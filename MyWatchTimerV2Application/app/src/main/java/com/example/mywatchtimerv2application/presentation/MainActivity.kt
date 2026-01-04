@@ -316,11 +316,10 @@ class MainActivity : Activity() {
             processResponse(cached)
         }
 
-        // Try to sync any pending offline work
-        syncOfflineQueue()
-
-        // Fetch fresh data
-        fetchSmokeData()
+        // Fetch fresh data, THEN try to sync pending offline work
+        fetchSmokeData {
+            syncOfflineQueue()
+        }
     }
 
     private fun processResponse(response: String) {
@@ -367,7 +366,7 @@ class MainActivity : Activity() {
 
     // --- NEW: Function to fetch and process data from the web service ---
     // --- MODIFIED: Function to fetch and filter data from the web service ---
-    private fun fetchSmokeData() {
+    private fun fetchSmokeData(onSuccess: (() -> Unit)? = null) {
         val url = "https://us-central1-smoke-tracker-api-1207.cloudfunctions.net/api/smoke/today"
         val queue = Volley.newRequestQueue(this)
 
@@ -395,6 +394,9 @@ class MainActivity : Activity() {
 
                 processResponse(response) // I moved your parsing logic into this helper
                 Toast.makeText(this, "Successfully fetched data", Toast.LENGTH_SHORT).show()
+                
+                // Execute callback if provided
+                onSuccess?.invoke()
             },
             { error ->
                 Log.e(TAG, "Volley request failed: ${error.message}")
@@ -457,7 +459,11 @@ class MainActivity : Activity() {
                     val url = "https://us-central1-smoke-tracker-api-1207.cloudfunctions.net/api/smoke"
                     val queue = Volley.newRequestQueue(this)
                     val postRequest = object : StringRequest(Method.POST, url,
-                        { fetchSmokeData() },
+                        {
+                            Toast.makeText(this, "Smoked posted", Toast.LENGTH_SHORT).show()
+
+                            fetchSmokeData()
+                        },
                         {
                             progressBar.visibility = View.GONE
                             queueOfflinePost(type)
