@@ -247,13 +247,17 @@ class MainActivity : Activity() {
     private lateinit var tvEndTime: TextView
     private lateinit var btnCigarette: ImageButton
     private lateinit var btnWeed: ImageButton
+    private lateinit var btnThc: ImageButton
     private lateinit var btnReset: ImageButton
     private lateinit var tvCigCount: TextView
     private lateinit var tvWeedCount: TextView
+    private lateinit var tvThcCount: TextView
     private lateinit var llCigEntries: LinearLayout
     private lateinit var llWeedEntries: LinearLayout
+    private lateinit var llThcEntries: LinearLayout
     private lateinit var tvCigTitle: TextView
     private lateinit var tvWeedTitle: TextView
+    private lateinit var tvThcTitle: TextView
 
     // State
     private var timerService: TimerService? = null
@@ -264,6 +268,7 @@ class MainActivity : Activity() {
     // State
     private var cigEntries = mutableListOf<SmokeEntry>()
     private var weedEntries = mutableListOf<SmokeEntry>()
+    private var thcEntries = mutableListOf<SmokeEntry>()
 
     private lateinit var progressBar: ProgressBar
 
@@ -322,6 +327,7 @@ class MainActivity : Activity() {
         try {
             cigEntries.clear()
             weedEntries.clear()
+            thcEntries.clear()
 
             // CHANGE THIS LINE:
             // From: val jsonArray = JSONArray(response)
@@ -344,6 +350,8 @@ class MainActivity : Activity() {
                         cigEntries.add(SmokeEntry(entryId, formattedTime))
                     } else if (type == "joint") {
                         weedEntries.add(SmokeEntry(entryId, formattedTime))
+                    } else if (type == "thc_joint") {
+                        thcEntries.add(SmokeEntry(entryId, formattedTime))
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Parsing error: $e")
@@ -414,8 +422,10 @@ class MainActivity : Activity() {
 
         if (type == "cigarette") {
             cigEntries.add(0, tempEntry)
-        } else {
+        } else if (type == "joint") {
             weedEntries.add(0, tempEntry)
+        } else if (type == "thc_joint") {
+            thcEntries.add(0, tempEntry)
         }
 
         // Refresh the screen counts and list immediately
@@ -471,11 +481,16 @@ class MainActivity : Activity() {
         val root = JSONObject()
         val dataArray = JSONArray()
 
-        val allEntries = cigEntries + weedEntries
+        val allEntries = cigEntries + weedEntries + thcEntries
         allEntries.forEach { entry ->
             val obj = JSONObject()
             obj.put("id", entry.id)
-            obj.put("type", if (cigEntries.contains(entry)) "cigarette" else "joint")
+            val type = when {
+                cigEntries.contains(entry) -> "cigarette"
+                weedEntries.contains(entry) -> "joint"
+                else -> "thc_joint"
+            }
+            obj.put("type", type)
             // We store a dummy ISO string for the cache to keep processResponse happy
             obj.put("createdAt", OffsetDateTime.now().toString())
             dataArray.put(obj)
@@ -526,13 +541,17 @@ class MainActivity : Activity() {
         tvEndTime = findViewById(R.id.tvEndTime)
         btnCigarette = findViewById(R.id.btnCigarette)
         btnWeed = findViewById(R.id.btnWeed)
+        btnThc = findViewById(R.id.btnThc)
         btnReset = findViewById(R.id.btnReset)
         tvCigCount = findViewById(R.id.tvCigCount)
         tvWeedCount = findViewById(R.id.tvWeedCount)
+        tvThcCount = findViewById(R.id.tvThcCount)
         llCigEntries = findViewById(R.id.llCigEntries)
         llWeedEntries = findViewById(R.id.llWeedEntries)
+        llThcEntries = findViewById(R.id.llThcEntries)
         tvCigTitle = findViewById(R.id.tvCigTitle)
         tvWeedTitle = findViewById(R.id.tvWeedTitle)
+        tvThcTitle = findViewById(R.id.tvThcTitle)
 
         // Local data loading is now less critical but good for initial state before network responds
         loadEndTime(this) // Still load timer state
@@ -551,6 +570,11 @@ class MainActivity : Activity() {
 
         btnWeed.setOnClickListener {
             postSmokeEntry("joint")
+            restartTimer()
+        }
+
+        btnThc.setOnClickListener {
+            postSmokeEntry("thc_joint")
             restartTimer()
         }
 
@@ -582,12 +606,14 @@ class MainActivity : Activity() {
     private fun updateCounterUI() {
         tvCigCount.text = "Cigarettes: " + cigEntries.size.toString()
         tvWeedCount.text = "Joints: " + weedEntries.size.toString()
+        tvThcCount.text = "THC Count: " + thcEntries.size.toString()
     }
 
 
     private fun updateEntriesUI() {
         llCigEntries.removeAllViews()
         llWeedEntries.removeAllViews()
+        llThcEntries.removeAllViews()
 
         // --- Cigarettes ---
         if (cigEntries.isNotEmpty()) {
@@ -627,6 +653,25 @@ class MainActivity : Activity() {
             }
         } else {
             tvWeedTitle.visibility = View.GONE
+        }
+
+        // --- THC Joints ---
+        if (thcEntries.isNotEmpty()) {
+            tvThcTitle.visibility = View.VISIBLE
+            thcEntries.forEach { entry ->
+                val textView = TextView(this).apply {
+                    text = entry.time
+                    textSize = 18f
+                    textAlignment = View.TEXT_ALIGNMENT_CENTER
+                    setPadding(0, 8, 0, 8)
+                    setOnClickListener {
+                        showDeleteConfirmationDialog(entry.id)
+                    }
+                }
+                llThcEntries.addView(textView)
+            }
+        } else {
+            tvThcTitle.visibility = View.GONE
         }
     }
 
@@ -717,6 +762,7 @@ class MainActivity : Activity() {
         // This now only clears the local UI until the next fetch
         cigEntries.clear()
         weedEntries.clear()
+        thcEntries.clear()
         updateCounterUI()
         updateEntriesUI()
         // Note: You might want a server-side endpoint to clear data
