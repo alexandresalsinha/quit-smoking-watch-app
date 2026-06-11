@@ -310,15 +310,9 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
 
-        // Load Cache for instant view
-        val cached = loadDataFromCache()
-        if (cached != null) {
-            processResponse(cached)
-        }
-
-        // Fetch fresh data, THEN try to sync pending offline work
-        fetchSmokeData {
-            syncOfflineQueue()
+        // Sync pending offline work, THEN fetch fresh data
+        syncOfflineQueue {
+            fetchSmokeData()
         }
     }
 
@@ -558,6 +552,12 @@ class MainActivity : Activity() {
         tvCigTitle = findViewById(R.id.tvCigTitle)
         tvWeedTitle = findViewById(R.id.tvWeedTitle)
         tvThcTitle = findViewById(R.id.tvThcTitle)
+
+        // --- NEW: Load Cache IMMEDIATELY for instant view ---
+        val cached = loadDataFromCache()
+        if (cached != null) {
+            processResponse(cached)
+        }
 
         // Local data loading is now less critical but good for initial state before network responds
         loadEndTime(this) // Still load timer state
@@ -822,46 +822,45 @@ class MainActivity : Activity() {
 
     // Check if internet is available
     private fun isNetworkAvailable(): Boolean {
-        return try {
-            val timeoutMs = 1500
-            val socket = java.net.Socket()
-            val socketAddress = java.net.InetSocketAddress("8.8.8.8", 53)
-
-            socket.connect(socketAddress, timeoutMs)
-            socket.close()
-            //Toast.makeText(this, "Network Offline", Toast.LENGTH_SHORT).show()
-            true
-        } catch (e: Exception) {
-            //Toast.makeText(this, "Network Online", Toast.LENGTH_SHORT).show()
-            false
-        }
+        val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val network = connectivityManager.activeNetwork ?: return false
+        val activeNetwork = connectivityManager.getNetworkCapabilities(network) ?: return false
+        return activeNetwork.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 
 
     // Save a failed post to the queue
     private fun queueOfflinePost(type: String) {
         val prefs = getSharedPreferences(QUEUE_PREFS, Context.MODE_PRIVATE)
-        val currentQueue = prefs.getStringSet(QUEUE_KEY, mutableSetOf())?.toMutableList() ?: mutableListOf()
+        val currentQueue = prefs.getStringSet(QUEUE_KEY, mutableSetOf())?.toMutableSet() ?: mutableSetOf()
 
         // Add timestamped entry to keep order: "timestamp|type"
         currentQueue.add("${System.currentTimeMillis()}|$type")
 
-        prefs.edit().putStringSet(QUEUE_KEY, currentQueue.toSet()).apply()
+        prefs.edit().putStringSet(QUEUE_KEY, currentQueue).apply()
         Toast.makeText(this, "Offline: Added to sync queue", Toast.LENGTH_SHORT).show()
     }
 
     // Process the queue when internet returns
-    private fun syncOfflineQueue() {
+    private fun syncOfflineQueue(onFinished: (() -> Unit)? = null) {
         Thread {
-            if (!isNetworkAvailable()) return@Thread
+            if (!isNetworkAvailable()) {
+                runOnUiThread { onFinished?.invoke() }
+                return@Thread
+            }
 
             runOnUiThread {
                 val prefs = getSharedPreferences(QUEUE_PREFS, Context.MODE_PRIVATE)
                 val currentQueue = prefs.getStringSet(QUEUE_KEY, emptySet())?.toMutableList()
-                    ?: return@runOnUiThread
-                if (currentQueue.isEmpty()) return@runOnUiThread
+                    ?: run {
+                        onFinished?.invoke()
+                        return@runOnUiThread
+                    }
+                if (currentQueue.isEmpty()) {
+                    onFinished?.invoke()
+                    return@runOnUiThread
+                }
 
-                // ... (Rest of your sorting and postNext logic remains the same)
                 val sortedQueue = currentQueue.sortedBy { it.split("|")[0] }
 
                 Log.d(TAG, "Syncing ${sortedQueue.size} pending entries...")
@@ -871,15 +870,13 @@ class MainActivity : Activity() {
                     if (index >= sortedQueue.size) {
                         // Finished! Clear queue and refresh data
                         prefs.edit().remove(QUEUE_KEY).apply()
-                        fetchSmokeData()
+                        onFinished?.invoke()
                         return
                     }
 
                     val type = sortedQueue[index].split("|")[1]
 
-                    // Use your existing logic but modified for the queue loop
-                    val url =
-                        "https://us-central1-smoke-tracker-api-1207.cloudfunctions.net/api/smoke"
+                    val url = "https://us-central1-smoke-tracker-api-1207.cloudfunctions.net/api/smoke"
                     val queue = Volley.newRequestQueue(this)
                     val postRequest = object : StringRequest(
                         Method.POST, url,
