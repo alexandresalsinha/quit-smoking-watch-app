@@ -232,7 +232,7 @@ class TimerService : Service() {
         super.onDestroy()
         mainTimer?.cancel()
         overtimeTimer?.cancel()
-        Log.d(TAG, "Service destroyed.")
+        //Log.d(TAG, "Service destroyed.")
     }
 }
 
@@ -309,11 +309,10 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-
         // Sync pending offline work, THEN fetch fresh data
-        syncOfflineQueue {
-            fetchSmokeData()
-        }
+//        syncOfflineQueue {
+////            fetchSmokeData()
+//        }
     }
 
     private fun processResponse(response: String) {
@@ -347,13 +346,13 @@ class MainActivity : Activity() {
                         thcEntries.add(SmokeEntry(entryId, formattedTime))
                     }
                 } catch (e: Exception) {
-                    Log.e(TAG, "Parsing error: $e")
+                    //Log.e(TAG, "Parsing error: $e")
                 }
             }
             updateCounterUI()
             updateEntriesUI()
         } catch (e: Exception) {
-            Log.e(TAG, "JSON process error: $e")
+            //Log.e(TAG, "JSON process error: $e")
         }
     }
 
@@ -364,23 +363,23 @@ class MainActivity : Activity() {
         val url = "https://us-central1-smoke-tracker-api-1207.cloudfunctions.net/api/smoke/today"
         val queue = Volley.newRequestQueue(this)
 
-        progressBar.visibility = View.VISIBLE
+//        progressBar.visibility = View.VISIBLE
         Thread {
             val online = isNetworkAvailable()
 
             runOnUiThread {
                 if (online) {
-                    Toast.makeText(this, "Network Online", Toast.LENGTH_SHORT).show()
+//                    Toast.makeText(this, "Network Online", Toast.LENGTH_SHORT).show()
 
                 } else {
-                    Toast.makeText(this, "Network Offline", Toast.LENGTH_SHORT).show()
+//                    Toast.makeText(this, "Network Offline", Toast.LENGTH_SHORT).show()
                 }
             }
         }.start()
 
         val stringRequest = StringRequest(Request.Method.GET, url,
             { response ->
-                Log.d(TAG, "Successfully fetched data.")
+                //Log.d(TAG, "Successfully fetched data.")
                 progressBar.visibility = View.GONE
 
                 // --- 1. SAVE TO CACHE ON SUCCESS ---
@@ -393,7 +392,7 @@ class MainActivity : Activity() {
                 onSuccess?.invoke()
             },
             { error ->
-                Log.e(TAG, "Volley request failed: ${error.message}")
+                //Log.e(TAG, "Volley request failed: ${error.message}")
                 progressBar.visibility = View.GONE
 
                 // --- 2. LOAD FROM CACHE ON FAILURE ---
@@ -428,6 +427,11 @@ class MainActivity : Activity() {
         updateCounterUI()
         updateEntriesUI()
 
+        // --- PERSIST THE OPTIMISTIC STATE TO CACHE IMMEDIATELY ---
+        // This ensures if the user closes the app before syncing,
+        // the counters remain incremented on next open.
+        saveDataToCache(createCachedJsonFromCurrentLists())
+
         // 2. Check Network on Background Thread
         Thread {
             val online = isNetworkAvailable()
@@ -438,31 +442,22 @@ class MainActivity : Activity() {
 
                     // Queue the post for later sync
                     queueOfflinePost(type)
-
-                    // --- NEW: PERSIST THE OPTIMISTIC STATE TO CACHE ---
-                    // This ensures if the user closes the app before syncing,
-                    // the counters remain incremented on next open.
-                    val updatedJson = createCachedJsonFromCurrentLists()
-                    saveDataToCache(updatedJson)
-
                 } else {
-                    Toast.makeText(this, "Network Online", Toast.LENGTH_SHORT).show()
+//                    Toast.makeText(this, "Network Online", Toast.LENGTH_SHORT).show()
 
                     // 3. Proceed with Volley Post
-                    progressBar.visibility = View.VISIBLE
+//                    progressBar.visibility = View.VISIBLE
                     val url = "https://us-central1-smoke-tracker-api-1207.cloudfunctions.net/api/smoke"
                     val queue = Volley.newRequestQueue(this)
                     val postRequest = object : StringRequest(Method.POST, url,
                         {
-                            Toast.makeText(this, "Smoked posted", Toast.LENGTH_SHORT).show()
+//                            Toast.makeText(this, "Smoked posted", Toast.LENGTH_SHORT).show()
 
-                            fetchSmokeData()
+//                            fetchSmokeData()
                         },
                         {
                             progressBar.visibility = View.GONE
                             queueOfflinePost(type)
-                            // Also save to cache here in case of timeout/request error
-                            saveDataToCache(createCachedJsonFromCurrentLists())
                         }) {
                         override fun getBody() = "{\"type\":\"$type\"}".toByteArray()
                         override fun getBodyContentType() = "application/json; charset=utf-8"
@@ -518,12 +513,12 @@ class MainActivity : Activity() {
 
         val deleteRequest = StringRequest(Request.Method.DELETE, url,
             { response ->
-                Log.d(TAG, "Successfully deleted entry: $response")
+                //Log.d(TAG, "Successfully deleted entry: $response")
                 Toast.makeText(this, "Entry deleted", Toast.LENGTH_SHORT).show()
                 fetchSmokeData() // Refresh the list
             },
             { error ->
-                Log.e(TAG, "Failed to delete entry: ${error.message}")
+                //Log.e(TAG, "Failed to delete entry: ${error.message}")
                 Toast.makeText(this, "Failed to delete", Toast.LENGTH_SHORT).show()
             }
         )
@@ -593,6 +588,11 @@ class MainActivity : Activity() {
                 showEditTimerDialog()
             }
             true
+        }
+
+        // Sync pending offline work, THEN fetch fresh data ONLY on first run
+        syncOfflineQueue {
+            fetchSmokeData()
         }
     }
 
@@ -863,7 +863,7 @@ class MainActivity : Activity() {
 
                 val sortedQueue = currentQueue.sortedBy { it.split("|")[0] }
 
-                Log.d(TAG, "Syncing ${sortedQueue.size} pending entries...")
+                //Log.d(TAG, "Syncing ${sortedQueue.size} pending entries...")
 
                 // Simple recursive sync to ensure sequential order
                 fun postNext(index: Int) {
