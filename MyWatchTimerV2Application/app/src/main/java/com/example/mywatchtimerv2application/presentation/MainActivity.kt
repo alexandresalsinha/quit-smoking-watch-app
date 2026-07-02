@@ -309,10 +309,6 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        // Sync pending offline work, THEN fetch fresh data
-//        syncOfflineQueue {
-////            fetchSmokeData()
-//        }
     }
 
     private fun processResponse(response: String) {
@@ -411,53 +407,22 @@ class MainActivity : Activity() {
 
     // --- NEW: Function to post data to the web service ---
     private fun postSmokeEntry(type: String) {
-        // 1. Optimistic UI Update (Instant count increase in memory)
-        val currentTime = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
-        val tempEntry = SmokeEntry("temp_${System.currentTimeMillis()}", currentTime)
-
-        if (type == "cigarette") {
-            cigEntries.add(0, tempEntry)
-        } else if (type == "joint") {
-            weedEntries.add(0, tempEntry)
-        } else if (type == "thc_joint") {
-            thcEntries.add(0, tempEntry)
-        }
-
-        // Refresh the screen counts and list immediately
-        updateCounterUI()
-        updateEntriesUI()
-
-        // --- PERSIST THE OPTIMISTIC STATE TO CACHE IMMEDIATELY ---
-        // This ensures if the user closes the app before syncing,
-        // the counters remain incremented on next open.
-        saveDataToCache(createCachedJsonFromCurrentLists())
-
-        // 2. Check Network on Background Thread
         Thread {
             val online = isNetworkAvailable()
 
             runOnUiThread {
                 if (!online) {
                     Toast.makeText(this, "Network Offline", Toast.LENGTH_SHORT).show()
-
-                    // Queue the post for later sync
-                    queueOfflinePost(type)
                 } else {
-//                    Toast.makeText(this, "Network Online", Toast.LENGTH_SHORT).show()
-
-                    // 3. Proceed with Volley Post
-//                    progressBar.visibility = View.VISIBLE
                     val url = "https://us-central1-smoke-tracker-api-1207.cloudfunctions.net/api/smoke"
                     val queue = Volley.newRequestQueue(this)
                     val postRequest = object : StringRequest(Method.POST, url,
                         {
-//                            Toast.makeText(this, "Smoked posted", Toast.LENGTH_SHORT).show()
-
-//                            fetchSmokeData()
+                            fetchSmokeData()
                         },
                         {
                             progressBar.visibility = View.GONE
-                            queueOfflinePost(type)
+                            Toast.makeText(this, "Failed to post entry", Toast.LENGTH_SHORT).show()
                         }) {
                         override fun getBody() = "{\"type\":\"$type\"}".toByteArray()
                         override fun getBodyContentType() = "application/json; charset=utf-8"
@@ -467,34 +432,6 @@ class MainActivity : Activity() {
             }
         }.start()
     }
-
-    /**
-     * Helper to convert the current in-memory lists (including temp entries)
-     * back into the JSON format expected by processResponse.
-     */
-    private fun createCachedJsonFromCurrentLists(): String {
-        val root = JSONObject()
-        val dataArray = JSONArray()
-
-        val allEntries = cigEntries + weedEntries + thcEntries
-        allEntries.forEach { entry ->
-            val obj = JSONObject()
-            obj.put("id", entry.id)
-            val type = when {
-                cigEntries.contains(entry) -> "cigarette"
-                weedEntries.contains(entry) -> "joint"
-                else -> "thc_joint"
-            }
-            obj.put("type", type)
-            // We store a dummy ISO string for the cache to keep processResponse happy
-            obj.put("createdAt", OffsetDateTime.now().toString())
-            dataArray.put(obj)
-        }
-
-        root.put("data", dataArray)
-        return root.toString()
-    }
-
 
     private fun showDeleteConfirmationDialog(entryId: String) {
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
@@ -590,10 +527,8 @@ class MainActivity : Activity() {
             true
         }
 
-        // Sync pending offline work, THEN fetch fresh data ONLY on first run
-        syncOfflineQueue {
-            fetchSmokeData()
-        }
+        // Fetch fresh data on startup
+        fetchSmokeData()
     }
 
     private fun updateUI() {
@@ -816,82 +751,12 @@ class MainActivity : Activity() {
         val prefs = getSharedPreferences("SmokeCache", Context.MODE_PRIVATE)
         return prefs.getString("last_response", null)
     }
-    // Add to state variables
-    private val QUEUE_PREFS = "OfflineQueue"
-    private val QUEUE_KEY = "pending_posts"
-
     // Check if internet is available
     private fun isNetworkAvailable(): Boolean {
         val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val network = connectivityManager.activeNetwork ?: return false
         val activeNetwork = connectivityManager.getNetworkCapabilities(network) ?: return false
         return activeNetwork.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-    }
-
-
-    // Save a failed post to the queue
-    private fun queueOfflinePost(type: String) {
-        val prefs = getSharedPreferences(QUEUE_PREFS, Context.MODE_PRIVATE)
-        val currentQueue = prefs.getStringSet(QUEUE_KEY, mutableSetOf())?.toMutableSet() ?: mutableSetOf()
-
-        // Add timestamped entry to keep order: "timestamp|type"
-        currentQueue.add("${System.currentTimeMillis()}|$type")
-
-        prefs.edit().putStringSet(QUEUE_KEY, currentQueue).apply()
-        Toast.makeText(this, "Offline: Added to sync queue", Toast.LENGTH_SHORT).show()
-    }
-
-    // Process the queue when internet returns
-    private fun syncOfflineQueue(onFinished: (() -> Unit)? = null) {
-        Thread {
-            if (!isNetworkAvailable()) {
-                runOnUiThread { onFinished?.invoke() }
-                return@Thread
-            }
-
-            runOnUiThread {
-                val prefs = getSharedPreferences(QUEUE_PREFS, Context.MODE_PRIVATE)
-                val currentQueue = prefs.getStringSet(QUEUE_KEY, emptySet())?.toMutableList()
-                    ?: run {
-                        onFinished?.invoke()
-                        return@runOnUiThread
-                    }
-                if (currentQueue.isEmpty()) {
-                    onFinished?.invoke()
-                    return@runOnUiThread
-                }
-
-                val sortedQueue = currentQueue.sortedBy { it.split("|")[0] }
-
-                //Log.d(TAG, "Syncing ${sortedQueue.size} pending entries...")
-
-                // Simple recursive sync to ensure sequential order
-                fun postNext(index: Int) {
-                    if (index >= sortedQueue.size) {
-                        // Finished! Clear queue and refresh data
-                        prefs.edit().remove(QUEUE_KEY).apply()
-                        onFinished?.invoke()
-                        return
-                    }
-
-                    val type = sortedQueue[index].split("|")[1]
-
-                    val url = "https://us-central1-smoke-tracker-api-1207.cloudfunctions.net/api/smoke"
-                    val queue = Volley.newRequestQueue(this)
-                    val postRequest = object : StringRequest(
-                        Method.POST, url,
-                        { postNext(index + 1) }, // On success, post next
-                        { postNext(index + 1) }  // On error, skip to next to avoid getting stuck
-                    ) {
-                        override fun getBody() = "{\"type\":\"$type\"}".toByteArray()
-                        override fun getBodyContentType() = "application/json; charset=utf-8"
-                    }
-                    queue.add(postRequest)
-                }
-
-                postNext(0)
-            }
-        }.start()
     }
 
 
