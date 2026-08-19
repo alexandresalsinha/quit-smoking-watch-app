@@ -14,8 +14,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.ServiceConnection
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import android.os.Binder
 import android.os.Build
 import android.os.Bundle
@@ -34,18 +32,15 @@ import androidx.compose.ui.semantics.text
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 //import androidx.glance.visibility
-import com.android.volley.Request
-import com.android.volley.toolbox.StringRequest
-import com.android.volley.toolbox.Volley
 import com.example.mywatchtimerv2application.R
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
+import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
-import java.util.Calendar
-import java.util.Date
 import java.util.Locale
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 
@@ -353,84 +348,39 @@ class MainActivity : Activity() {
     }
 
 
-    // --- NEW: Function to fetch and process data from the web service ---
-    // --- MODIFIED: Function to fetch and filter data from the web service ---
-    private fun fetchSmokeData(onSuccess: (() -> Unit)? = null) {
-        val url = "https://us-central1-smoke-tracker-api-1207.cloudfunctions.net/api/smoke/today"
-        val queue = Volley.newRequestQueue(this)
+    // --- Load entries from local storage and render today's data ---
+    private fun renderLocalData() {
+        val all = loadLocalEntries()
+        val today = LocalDate.now()
+        val todayArray = JSONArray()
 
-//        progressBar.visibility = View.VISIBLE
-        Thread {
-            val online = isNetworkAvailable()
-
-            runOnUiThread {
-                if (online) {
-//                    Toast.makeText(this, "Network Online", Toast.LENGTH_SHORT).show()
-
-                } else {
-//                    Toast.makeText(this, "Network Offline", Toast.LENGTH_SHORT).show()
+        for (i in 0 until all.length()) {
+            val entry = all.getJSONObject(i)
+            try {
+                val createdAt = OffsetDateTime.parse(entry.getString("createdAt"))
+                if (createdAt.toLocalDate() == today) {
+                    todayArray.put(entry)
                 }
+            } catch (e: Exception) {
+                //Log.e(TAG, "Skipping malformed entry: $e")
             }
-        }.start()
+        }
 
-        val stringRequest = StringRequest(Request.Method.GET, url,
-            { response ->
-                //Log.d(TAG, "Successfully fetched data.")
-                progressBar.visibility = View.GONE
-
-                // --- 1. SAVE TO CACHE ON SUCCESS ---
-                saveDataToCache(response)
-
-                processResponse(response) // I moved your parsing logic into this helper
-                Toast.makeText(this, "Successfully fetched data", Toast.LENGTH_SHORT).show()
-                
-                // Execute callback if provided
-                onSuccess?.invoke()
-            },
-            { error ->
-                //Log.e(TAG, "Volley request failed: ${error.message}")
-                progressBar.visibility = View.GONE
-
-                // --- 2. LOAD FROM CACHE ON FAILURE ---
-                val cachedData = loadDataFromCache()
-                if (cachedData != null) {
-                    processResponse(cachedData)
-                    Toast.makeText(this, "Offline: Showing cached data", Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(this, "Network error and no cached data", Toast.LENGTH_SHORT).show()
-                }
-            }
-        )
-        queue.add(stringRequest)
+        val response = JSONObject().put("data", todayArray)
+        processResponse(response.toString())
     }
 
-
-    // --- NEW: Function to post data to the web service ---
+    // --- Add a new entry directly to local storage ---
     private fun postSmokeEntry(type: String) {
-        Thread {
-            val online = isNetworkAvailable()
-
-            runOnUiThread {
-                if (!online) {
-                    Toast.makeText(this, "Network Offline", Toast.LENGTH_SHORT).show()
-                } else {
-                    val url = "https://us-central1-smoke-tracker-api-1207.cloudfunctions.net/api/smoke"
-                    val queue = Volley.newRequestQueue(this)
-                    val postRequest = object : StringRequest(Method.POST, url,
-                        {
-                            fetchSmokeData()
-                        },
-                        {
-                            progressBar.visibility = View.GONE
-                            Toast.makeText(this, "Failed to post entry", Toast.LENGTH_SHORT).show()
-                        }) {
-                        override fun getBody() = "{\"type\":\"$type\"}".toByteArray()
-                        override fun getBodyContentType() = "application/json; charset=utf-8"
-                    }
-                    queue.add(postRequest)
-                }
-            }
-        }.start()
+        val all = loadLocalEntries()
+        val entry = JSONObject().apply {
+            put("id", UUID.randomUUID().toString())
+            put("type", type)
+            put("createdAt", OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME))
+        }
+        all.put(entry)
+        saveLocalEntries(all)
+        renderLocalData()
     }
 
     private fun showDeleteConfirmationDialog(entryId: String) {
@@ -445,21 +395,17 @@ class MainActivity : Activity() {
     }
 
     private fun deleteSmokeEntry(entryId: String) {
-        val url = "https://us-central1-smoke-tracker-api-1207.cloudfunctions.net/api/smoke/$entryId"
-        val queue = Volley.newRequestQueue(this)
-
-        val deleteRequest = StringRequest(Request.Method.DELETE, url,
-            { response ->
-                //Log.d(TAG, "Successfully deleted entry: $response")
-                Toast.makeText(this, "Entry deleted", Toast.LENGTH_SHORT).show()
-                fetchSmokeData() // Refresh the list
-            },
-            { error ->
-                //Log.e(TAG, "Failed to delete entry: ${error.message}")
-                Toast.makeText(this, "Failed to delete", Toast.LENGTH_SHORT).show()
+        val all = loadLocalEntries()
+        val remaining = JSONArray()
+        for (i in 0 until all.length()) {
+            val entry = all.getJSONObject(i)
+            if (entry.optString("id") != entryId) {
+                remaining.put(entry)
             }
-        )
-        queue.add(deleteRequest)
+        }
+        saveLocalEntries(remaining)
+        renderLocalData()
+        Toast.makeText(this, "Entry deleted", Toast.LENGTH_SHORT).show()
     }
 
     @SuppressLint("UnspecifiedRegisterReceiverFlag")
@@ -485,14 +431,10 @@ class MainActivity : Activity() {
         tvWeedTitle = findViewById(R.id.tvWeedTitle)
         tvThcTitle = findViewById(R.id.tvThcTitle)
 
-        // --- NEW: Load Cache IMMEDIATELY for instant view ---
-        val cached = loadDataFromCache()
-        if (cached != null) {
-            processResponse(cached)
-        }
+        // --- Load entries from local storage for instant view ---
+        renderLocalData()
 
-        // Local data loading is now less critical but good for initial state before network responds
-        loadEndTime(this) // Still load timer state
+        loadEndTime(this) // Load timer state
         checkAndResetCountersIfNeeded()
         updateEndTimeDisplay()
 
@@ -526,9 +468,6 @@ class MainActivity : Activity() {
             }
             true
         }
-
-        // Fetch fresh data on startup
-        fetchSmokeData()
     }
 
     private fun updateUI() {
@@ -693,20 +632,20 @@ class MainActivity : Activity() {
     private fun showResetConfirmationDialog() {
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
             .setTitle("Reset Counters")
-            .setMessage("This does not clear server data. Are you sure?")
+            .setMessage("This will permanently delete all locally stored entries. Are you sure?")
             .setPositiveButton("Reset") { _, _ -> performReset() }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
     private fun performReset() {
-        // This now only clears the local UI until the next fetch
+        // Clear all locally stored entries
+        saveLocalEntries(JSONArray())
         cigEntries.clear()
         weedEntries.clear()
         thcEntries.clear()
         updateCounterUI()
         updateEntriesUI()
-        // Note: You might want a server-side endpoint to clear data
     }
 
     private fun updateEndTimeDisplay() {
@@ -742,21 +681,20 @@ class MainActivity : Activity() {
         endTimeMillis = prefs.getLong("endTime", 0L)
     }
 
-    private fun saveDataToCache(json: String) {
-        val prefs = getSharedPreferences("SmokeCache", Context.MODE_PRIVATE)
-        prefs.edit().putString("last_response", json).apply()
+    // --- Local entry storage (source of truth) ---
+    private fun loadLocalEntries(): JSONArray {
+        val prefs = getSharedPreferences("SmokeLocal", Context.MODE_PRIVATE)
+        val raw = prefs.getString("entries", null) ?: return JSONArray()
+        return try {
+            JSONArray(raw)
+        } catch (e: Exception) {
+            JSONArray()
+        }
     }
 
-    private fun loadDataFromCache(): String? {
-        val prefs = getSharedPreferences("SmokeCache", Context.MODE_PRIVATE)
-        return prefs.getString("last_response", null)
-    }
-    // Check if internet is available
-    private fun isNetworkAvailable(): Boolean {
-        val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val network = connectivityManager.activeNetwork ?: return false
-        val activeNetwork = connectivityManager.getNetworkCapabilities(network) ?: return false
-        return activeNetwork.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    private fun saveLocalEntries(entries: JSONArray) {
+        val prefs = getSharedPreferences("SmokeLocal", Context.MODE_PRIVATE)
+        prefs.edit().putString("entries", entries.toString()).apply()
     }
 
 
