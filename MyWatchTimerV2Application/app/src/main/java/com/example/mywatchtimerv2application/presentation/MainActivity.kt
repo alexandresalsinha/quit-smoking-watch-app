@@ -36,7 +36,6 @@ import com.example.mywatchtimerv2application.R
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
-import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -237,6 +236,10 @@ class TimerService : Service() {
 class MainActivity : Activity() {
 
     private val TAG = "MainActivity"
+
+    // Hour of day (0-23) at which the daily counters reset.
+    private val RESET_HOUR = 9
+
     // UI
     private lateinit var timerText: TextView
     private lateinit var tvEndTime: TextView
@@ -304,6 +307,8 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        // Re-render in case the 9:00am reset boundary was crossed while backgrounded.
+        renderLocalData()
     }
 
     private fun processResponse(response: String) {
@@ -348,17 +353,20 @@ class MainActivity : Activity() {
     }
 
 
-    // --- Load entries from local storage and render today's data ---
+    // --- Load entries from local storage and render the current period's data ---
+    // The "day" for counting purposes starts at 9:00am. Counters therefore reset
+    // once per day at 9:00am: before 9:00am we still count from yesterday's 9:00am,
+    // at/after 9:00am we count from today's 9:00am.
     private fun renderLocalData() {
         val all = loadLocalEntries()
-        val today = LocalDate.now()
+        val periodStart = currentPeriodStart()
         val todayArray = JSONArray()
 
         for (i in 0 until all.length()) {
             val entry = all.getJSONObject(i)
             try {
                 val createdAt = OffsetDateTime.parse(entry.getString("createdAt"))
-                if (createdAt.toLocalDate() == today) {
+                if (!createdAt.isBefore(periodStart)) {
                     todayArray.put(entry)
                 }
             } catch (e: Exception) {
@@ -368,6 +376,14 @@ class MainActivity : Activity() {
 
         val response = JSONObject().put("data", todayArray)
         processResponse(response.toString())
+    }
+
+    // Start of the current counting period: the most recent 9:00am boundary.
+    private fun currentPeriodStart(): OffsetDateTime {
+        val now = OffsetDateTime.now()
+        val nineToday = now.toLocalDate().atTime(RESET_HOUR, 0)
+            .atOffset(now.offset)
+        return if (now.isBefore(nineToday)) nineToday.minusDays(1) else nineToday
     }
 
     // --- Add a new entry directly to local storage ---
