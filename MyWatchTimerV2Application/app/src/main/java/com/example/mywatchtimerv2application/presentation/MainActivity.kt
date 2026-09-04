@@ -14,8 +14,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.ServiceConnection
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import android.os.Binder
 import android.os.Build
 import android.os.Bundle
@@ -34,18 +32,14 @@ import androidx.compose.ui.semantics.text
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 //import androidx.glance.visibility
-import com.android.volley.Request
-import com.android.volley.toolbox.StringRequest
-import com.android.volley.toolbox.Volley
 import com.example.mywatchtimerv2application.R
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
-import java.util.Calendar
-import java.util.Date
 import java.util.Locale
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 
@@ -232,7 +226,7 @@ class TimerService : Service() {
         super.onDestroy()
         mainTimer?.cancel()
         overtimeTimer?.cancel()
-        Log.d(TAG, "Service destroyed.")
+        //Log.d(TAG, "Service destroyed.")
     }
 }
 
@@ -242,6 +236,10 @@ class TimerService : Service() {
 class MainActivity : Activity() {
 
     private val TAG = "MainActivity"
+
+    // Hour of day (0-23) at which the daily counters reset.
+    private val RESET_HOUR = 9
+
     // UI
     private lateinit var timerText: TextView
     private lateinit var tvEndTime: TextView
@@ -309,17 +307,8 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-
-        // Load Cache for instant view
-        val cached = loadDataFromCache()
-        if (cached != null) {
-            processResponse(cached)
-        }
-
-        // Fetch fresh data, THEN try to sync pending offline work
-        fetchSmokeData {
-            syncOfflineQueue()
-        }
+        // Re-render in case the 9:00am reset boundary was crossed while backgrounded.
+        renderLocalData()
     }
 
     private fun processResponse(response: String) {
@@ -353,159 +342,62 @@ class MainActivity : Activity() {
                         thcEntries.add(SmokeEntry(entryId, formattedTime))
                     }
                 } catch (e: Exception) {
-                    Log.e(TAG, "Parsing error: $e")
+                    //Log.e(TAG, "Parsing error: $e")
                 }
             }
             updateCounterUI()
             updateEntriesUI()
         } catch (e: Exception) {
-            Log.e(TAG, "JSON process error: $e")
+            //Log.e(TAG, "JSON process error: $e")
         }
     }
 
 
-    // --- NEW: Function to fetch and process data from the web service ---
-    // --- MODIFIED: Function to fetch and filter data from the web service ---
-    private fun fetchSmokeData(onSuccess: (() -> Unit)? = null) {
-        val url = "https://us-central1-smoke-tracker-api-1207.cloudfunctions.net/api/smoke/today"
-        val queue = Volley.newRequestQueue(this)
+    // --- Load entries from local storage and render the current period's data ---
+    // The "day" for counting purposes starts at 9:00am. Counters therefore reset
+    // once per day at 9:00am: before 9:00am we still count from yesterday's 9:00am,
+    // at/after 9:00am we count from today's 9:00am.
+    private fun renderLocalData() {
+        val all = loadLocalEntries()
+        val periodStart = currentPeriodStart()
+        val todayArray = JSONArray()
 
-        progressBar.visibility = View.VISIBLE
-        Thread {
-            val online = isNetworkAvailable()
-
-            runOnUiThread {
-                if (online) {
-                    Toast.makeText(this, "Network Online", Toast.LENGTH_SHORT).show()
-
-                } else {
-                    Toast.makeText(this, "Network Offline", Toast.LENGTH_SHORT).show()
+        for (i in 0 until all.length()) {
+            val entry = all.getJSONObject(i)
+            try {
+                val createdAt = OffsetDateTime.parse(entry.getString("createdAt"))
+                if (!createdAt.isBefore(periodStart)) {
+                    todayArray.put(entry)
                 }
+            } catch (e: Exception) {
+                //Log.e(TAG, "Skipping malformed entry: $e")
             }
-        }.start()
+        }
 
-        val stringRequest = StringRequest(Request.Method.GET, url,
-            { response ->
-                Log.d(TAG, "Successfully fetched data.")
-                progressBar.visibility = View.GONE
-
-                // --- 1. SAVE TO CACHE ON SUCCESS ---
-                saveDataToCache(response)
-
-                processResponse(response) // I moved your parsing logic into this helper
-                Toast.makeText(this, "Successfully fetched data", Toast.LENGTH_SHORT).show()
-                
-                // Execute callback if provided
-                onSuccess?.invoke()
-            },
-            { error ->
-                Log.e(TAG, "Volley request failed: ${error.message}")
-                progressBar.visibility = View.GONE
-
-                // --- 2. LOAD FROM CACHE ON FAILURE ---
-                val cachedData = loadDataFromCache()
-                if (cachedData != null) {
-                    processResponse(cachedData)
-                    Toast.makeText(this, "Offline: Showing cached data", Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(this, "Network error and no cached data", Toast.LENGTH_SHORT).show()
-                }
-            }
-        )
-        queue.add(stringRequest)
+        val response = JSONObject().put("data", todayArray)
+        processResponse(response.toString())
     }
 
+    // Start of the current counting period: the most recent 9:00am boundary.
+    private fun currentPeriodStart(): OffsetDateTime {
+        val now = OffsetDateTime.now()
+        val nineToday = now.toLocalDate().atTime(RESET_HOUR, 0)
+            .atOffset(now.offset)
+        return if (now.isBefore(nineToday)) nineToday.minusDays(1) else nineToday
+    }
 
-    // --- NEW: Function to post data to the web service ---
+    // --- Add a new entry directly to local storage ---
     private fun postSmokeEntry(type: String) {
-        // 1. Optimistic UI Update (Instant count increase in memory)
-        val currentTime = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
-        val tempEntry = SmokeEntry("temp_${System.currentTimeMillis()}", currentTime)
-
-        if (type == "cigarette") {
-            cigEntries.add(0, tempEntry)
-        } else if (type == "joint") {
-            weedEntries.add(0, tempEntry)
-        } else if (type == "thc_joint") {
-            thcEntries.add(0, tempEntry)
+        val all = loadLocalEntries()
+        val entry = JSONObject().apply {
+            put("id", UUID.randomUUID().toString())
+            put("type", type)
+            put("createdAt", OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME))
         }
-
-        // Refresh the screen counts and list immediately
-        updateCounterUI()
-        updateEntriesUI()
-
-        // 2. Check Network on Background Thread
-        Thread {
-            val online = isNetworkAvailable()
-
-            runOnUiThread {
-                if (!online) {
-                    Toast.makeText(this, "Network Offline", Toast.LENGTH_SHORT).show()
-
-                    // Queue the post for later sync
-                    queueOfflinePost(type)
-
-                    // --- NEW: PERSIST THE OPTIMISTIC STATE TO CACHE ---
-                    // This ensures if the user closes the app before syncing,
-                    // the counters remain incremented on next open.
-                    val updatedJson = createCachedJsonFromCurrentLists()
-                    saveDataToCache(updatedJson)
-
-                } else {
-                    Toast.makeText(this, "Network Online", Toast.LENGTH_SHORT).show()
-
-                    // 3. Proceed with Volley Post
-                    progressBar.visibility = View.VISIBLE
-                    val url = "https://us-central1-smoke-tracker-api-1207.cloudfunctions.net/api/smoke"
-                    val queue = Volley.newRequestQueue(this)
-                    val postRequest = object : StringRequest(Method.POST, url,
-                        {
-                            Toast.makeText(this, "Smoked posted", Toast.LENGTH_SHORT).show()
-
-                            fetchSmokeData()
-                        },
-                        {
-                            progressBar.visibility = View.GONE
-                            queueOfflinePost(type)
-                            // Also save to cache here in case of timeout/request error
-                            saveDataToCache(createCachedJsonFromCurrentLists())
-                        }) {
-                        override fun getBody() = "{\"type\":\"$type\"}".toByteArray()
-                        override fun getBodyContentType() = "application/json; charset=utf-8"
-                    }
-                    queue.add(postRequest)
-                }
-            }
-        }.start()
+        all.put(entry)
+        saveLocalEntries(all)
+        renderLocalData()
     }
-
-    /**
-     * Helper to convert the current in-memory lists (including temp entries)
-     * back into the JSON format expected by processResponse.
-     */
-    private fun createCachedJsonFromCurrentLists(): String {
-        val root = JSONObject()
-        val dataArray = JSONArray()
-
-        val allEntries = cigEntries + weedEntries + thcEntries
-        allEntries.forEach { entry ->
-            val obj = JSONObject()
-            obj.put("id", entry.id)
-            val type = when {
-                cigEntries.contains(entry) -> "cigarette"
-                weedEntries.contains(entry) -> "joint"
-                else -> "thc_joint"
-            }
-            obj.put("type", type)
-            // We store a dummy ISO string for the cache to keep processResponse happy
-            obj.put("createdAt", OffsetDateTime.now().toString())
-            dataArray.put(obj)
-        }
-
-        root.put("data", dataArray)
-        return root.toString()
-    }
-
 
     private fun showDeleteConfirmationDialog(entryId: String) {
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
@@ -519,21 +411,17 @@ class MainActivity : Activity() {
     }
 
     private fun deleteSmokeEntry(entryId: String) {
-        val url = "https://us-central1-smoke-tracker-api-1207.cloudfunctions.net/api/smoke/$entryId"
-        val queue = Volley.newRequestQueue(this)
-
-        val deleteRequest = StringRequest(Request.Method.DELETE, url,
-            { response ->
-                Log.d(TAG, "Successfully deleted entry: $response")
-                Toast.makeText(this, "Entry deleted", Toast.LENGTH_SHORT).show()
-                fetchSmokeData() // Refresh the list
-            },
-            { error ->
-                Log.e(TAG, "Failed to delete entry: ${error.message}")
-                Toast.makeText(this, "Failed to delete", Toast.LENGTH_SHORT).show()
+        val all = loadLocalEntries()
+        val remaining = JSONArray()
+        for (i in 0 until all.length()) {
+            val entry = all.getJSONObject(i)
+            if (entry.optString("id") != entryId) {
+                remaining.put(entry)
             }
-        )
-        queue.add(deleteRequest)
+        }
+        saveLocalEntries(remaining)
+        renderLocalData()
+        Toast.makeText(this, "Entry deleted", Toast.LENGTH_SHORT).show()
     }
 
     @SuppressLint("UnspecifiedRegisterReceiverFlag")
@@ -559,8 +447,10 @@ class MainActivity : Activity() {
         tvWeedTitle = findViewById(R.id.tvWeedTitle)
         tvThcTitle = findViewById(R.id.tvThcTitle)
 
-        // Local data loading is now less critical but good for initial state before network responds
-        loadEndTime(this) // Still load timer state
+        // --- Load entries from local storage for instant view ---
+        renderLocalData()
+
+        loadEndTime(this) // Load timer state
         checkAndResetCountersIfNeeded()
         updateEndTimeDisplay()
 
@@ -758,20 +648,20 @@ class MainActivity : Activity() {
     private fun showResetConfirmationDialog() {
         AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
             .setTitle("Reset Counters")
-            .setMessage("This does not clear server data. Are you sure?")
+            .setMessage("This will permanently delete all locally stored entries. Are you sure?")
             .setPositiveButton("Reset") { _, _ -> performReset() }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
     private fun performReset() {
-        // This now only clears the local UI until the next fetch
+        // Clear all locally stored entries
+        saveLocalEntries(JSONArray())
         cigEntries.clear()
         weedEntries.clear()
         thcEntries.clear()
         updateCounterUI()
         updateEntriesUI()
-        // Note: You might want a server-side endpoint to clear data
     }
 
     private fun updateEndTimeDisplay() {
@@ -807,94 +697,20 @@ class MainActivity : Activity() {
         endTimeMillis = prefs.getLong("endTime", 0L)
     }
 
-    private fun saveDataToCache(json: String) {
-        val prefs = getSharedPreferences("SmokeCache", Context.MODE_PRIVATE)
-        prefs.edit().putString("last_response", json).apply()
-    }
-
-    private fun loadDataFromCache(): String? {
-        val prefs = getSharedPreferences("SmokeCache", Context.MODE_PRIVATE)
-        return prefs.getString("last_response", null)
-    }
-    // Add to state variables
-    private val QUEUE_PREFS = "OfflineQueue"
-    private val QUEUE_KEY = "pending_posts"
-
-    // Check if internet is available
-    private fun isNetworkAvailable(): Boolean {
+    // --- Local entry storage (source of truth) ---
+    private fun loadLocalEntries(): JSONArray {
+        val prefs = getSharedPreferences("SmokeLocal", Context.MODE_PRIVATE)
+        val raw = prefs.getString("entries", null) ?: return JSONArray()
         return try {
-            val timeoutMs = 1500
-            val socket = java.net.Socket()
-            val socketAddress = java.net.InetSocketAddress("8.8.8.8", 53)
-
-            socket.connect(socketAddress, timeoutMs)
-            socket.close()
-            //Toast.makeText(this, "Network Offline", Toast.LENGTH_SHORT).show()
-            true
+            JSONArray(raw)
         } catch (e: Exception) {
-            //Toast.makeText(this, "Network Online", Toast.LENGTH_SHORT).show()
-            false
+            JSONArray()
         }
     }
 
-
-    // Save a failed post to the queue
-    private fun queueOfflinePost(type: String) {
-        val prefs = getSharedPreferences(QUEUE_PREFS, Context.MODE_PRIVATE)
-        val currentQueue = prefs.getStringSet(QUEUE_KEY, mutableSetOf())?.toMutableList() ?: mutableListOf()
-
-        // Add timestamped entry to keep order: "timestamp|type"
-        currentQueue.add("${System.currentTimeMillis()}|$type")
-
-        prefs.edit().putStringSet(QUEUE_KEY, currentQueue.toSet()).apply()
-        Toast.makeText(this, "Offline: Added to sync queue", Toast.LENGTH_SHORT).show()
-    }
-
-    // Process the queue when internet returns
-    private fun syncOfflineQueue() {
-        Thread {
-            if (!isNetworkAvailable()) return@Thread
-
-            runOnUiThread {
-                val prefs = getSharedPreferences(QUEUE_PREFS, Context.MODE_PRIVATE)
-                val currentQueue = prefs.getStringSet(QUEUE_KEY, emptySet())?.toMutableList()
-                    ?: return@runOnUiThread
-                if (currentQueue.isEmpty()) return@runOnUiThread
-
-                // ... (Rest of your sorting and postNext logic remains the same)
-                val sortedQueue = currentQueue.sortedBy { it.split("|")[0] }
-
-                Log.d(TAG, "Syncing ${sortedQueue.size} pending entries...")
-
-                // Simple recursive sync to ensure sequential order
-                fun postNext(index: Int) {
-                    if (index >= sortedQueue.size) {
-                        // Finished! Clear queue and refresh data
-                        prefs.edit().remove(QUEUE_KEY).apply()
-                        fetchSmokeData()
-                        return
-                    }
-
-                    val type = sortedQueue[index].split("|")[1]
-
-                    // Use your existing logic but modified for the queue loop
-                    val url =
-                        "https://us-central1-smoke-tracker-api-1207.cloudfunctions.net/api/smoke"
-                    val queue = Volley.newRequestQueue(this)
-                    val postRequest = object : StringRequest(
-                        Method.POST, url,
-                        { postNext(index + 1) }, // On success, post next
-                        { postNext(index + 1) }  // On error, skip to next to avoid getting stuck
-                    ) {
-                        override fun getBody() = "{\"type\":\"$type\"}".toByteArray()
-                        override fun getBodyContentType() = "application/json; charset=utf-8"
-                    }
-                    queue.add(postRequest)
-                }
-
-                postNext(0)
-            }
-        }.start()
+    private fun saveLocalEntries(entries: JSONArray) {
+        val prefs = getSharedPreferences("SmokeLocal", Context.MODE_PRIVATE)
+        prefs.edit().putString("entries", entries.toString()).apply()
     }
 
 
