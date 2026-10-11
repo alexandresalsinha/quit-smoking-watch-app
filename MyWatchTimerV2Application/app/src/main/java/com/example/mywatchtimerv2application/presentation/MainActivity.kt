@@ -19,6 +19,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.CountDownTimer
 import android.os.IBinder
+import android.os.SystemClock
 import android.text.InputType
 import android.util.Log
 import android.view.View
@@ -68,6 +69,7 @@ class TimerService : Service() {
     private var overtimeTimer: CountDownTimer? = null
     var timeRemaining: Long = INITIAL_TIME_MS // Make public for editing
     private var overtimeCounter: Long = 0
+    private var overtimeStartElapsed: Long = 0
     private var isRunning: Boolean = false
     private var isOvertime: Boolean = false
 
@@ -123,9 +125,13 @@ class TimerService : Service() {
 
     private fun startOvertimeTimer() {
         overtimeTimer?.cancel()
+        // Anchor to a wall-clock-independent start point so the counter reflects
+        // actual elapsed time even if individual onTick callbacks are delayed or
+        // skipped (e.g. due to Doze mode or background throttling on Wear OS).
+        overtimeStartElapsed = SystemClock.elapsedRealtime() - overtimeCounter
         overtimeTimer = object : CountDownTimer(Long.MAX_VALUE, 1000) {
             override fun onTick(millisUntilFinished: Long) {
-                overtimeCounter += 1000
+                overtimeCounter = SystemClock.elapsedRealtime() - overtimeStartElapsed
                 updateNotification(overtimeCounter, "Overtime...")
                 sendUpdateBroadcast()
             }
@@ -137,6 +143,9 @@ class TimerService : Service() {
         isRunning = false
         mainTimer?.cancel()
         overtimeTimer?.cancel()
+        if (isOvertime) {
+            overtimeCounter = SystemClock.elapsedRealtime() - overtimeStartElapsed
+        }
         updateNotification(if (isOvertime) overtimeCounter else timeRemaining, "Paused")
         sendUpdateBroadcast()
     }
