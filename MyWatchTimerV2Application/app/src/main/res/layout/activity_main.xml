@@ -56,7 +56,7 @@
                     android:tint="@android:color/white" />
 
                 <ImageButton
-                    android:id="@+id/btnWeed"
+                    android:id="@+id/btnCbd"
                     android:layout_width="0dp"
                     android:layout_height="60dp"
                     android:layout_marginStart="4dp"
@@ -69,14 +69,14 @@
                     android:tint="@android:color/white" />
 
                 <ImageButton
-                    android:id="@+id/btnThc"
+                    android:id="@+id/btnWeed"
                     android:layout_width="0dp"
                     android:layout_height="60dp"
                     android:layout_marginStart="4dp"
                     android:layout_marginEnd="4dp"
                     android:layout_weight="1"
                     android:backgroundTint="#E53935"
-                    android:contentDescription="THC Joint Smoked"
+                    android:contentDescription="Weed Joint Smoked"
                     android:scaleType="centerInside"
                     android:src="@drawable/marijuana_icon"
                     android:tint="@android:color/white" />
@@ -110,20 +110,20 @@
                 android:textSize="16sp" />
 
             <TextView
-                android:id="@+id/tvWeedCount"
+                android:id="@+id/tvCbdCount"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
-                android:text="Weed Count: 0"
+                android:text="CBD: 0"
                 android:textColor="@android:color/darker_gray"
                 android:textSize="16sp" />
 
             <TextView
-                android:id="@+id/tvThcCount"
+                android:id="@+id/tvWeedCount"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
-                android:text="THC Count: 0"
+                android:text="Weed: 0"
                 android:textColor="@android:color/darker_gray"
                 android:textSize="16sp" />
 
@@ -155,11 +155,11 @@
                 android:layout_height="16dp" />
 
             <TextView
-                android:id="@+id/tvWeedTitle"
+                android:id="@+id/tvCbdTitle"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="4dp"
-                android:text="Joints"
+                android:text="CBD"
                 android:textColor="@android:color/white"
                 android:textSize="16sp"
                 android:textStyle="bold"
@@ -167,7 +167,7 @@
                 tools:visibility="visible" />
 
             <LinearLayout
-                android:id="@+id/llWeedEntries"
+                android:id="@+id/llCbdEntries"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:gravity="center_horizontal"
@@ -178,11 +178,11 @@
                 android:layout_height="16dp" />
 
             <TextView
-                android:id="@+id/tvThcTitle"
+                android:id="@+id/tvWeedTitle"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="4dp"
-                android:text="THC Joints"
+                android:text="Weed Joints"
                 android:textColor="@android:color/white"
                 android:textSize="16sp"
                 android:textStyle="bold"
@@ -190,7 +190,7 @@
                 tools:visibility="visible" />
 
             <LinearLayout
-                android:id="@+id/llThcEntries"
+                android:id="@+id/llWeedEntries"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:gravity="center_horizontal"

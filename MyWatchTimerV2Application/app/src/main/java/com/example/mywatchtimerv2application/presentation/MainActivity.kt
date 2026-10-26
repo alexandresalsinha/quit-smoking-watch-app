@@ -253,29 +253,29 @@ class MainActivity : Activity() {
     private lateinit var timerText: TextView
     private lateinit var tvEndTime: TextView
     private lateinit var btnCigarette: ImageButton
+    private lateinit var btnCbd: ImageButton
     private lateinit var btnWeed: ImageButton
-    private lateinit var btnThc: ImageButton
     private lateinit var btnReset: ImageButton
     private lateinit var tvCigCount: TextView
+    private lateinit var tvCbdCount: TextView
     private lateinit var tvWeedCount: TextView
-    private lateinit var tvThcCount: TextView
     private lateinit var llCigEntries: LinearLayout
+    private lateinit var llCbdEntries: LinearLayout
     private lateinit var llWeedEntries: LinearLayout
-    private lateinit var llThcEntries: LinearLayout
     private lateinit var tvCigTitle: TextView
+    private lateinit var tvCbdTitle: TextView
     private lateinit var tvWeedTitle: TextView
-    private lateinit var tvThcTitle: TextView
 
     // State
     private var timerService: TimerService? = null
     private var isBound = false
     private var endTimeMillis: Long = 0
 
-    // NOTE: cigEntries and weedEntries are now populated from the network, not SharedPreferences
+    // NOTE: cigEntries and cbdEntries are now populated from the network, not SharedPreferences
     // State
     private var cigEntries = mutableListOf<SmokeEntry>()
+    private var cbdEntries = mutableListOf<SmokeEntry>()
     private var weedEntries = mutableListOf<SmokeEntry>()
-    private var thcEntries = mutableListOf<SmokeEntry>()
 
     private lateinit var progressBar: ProgressBar
 
@@ -323,8 +323,8 @@ class MainActivity : Activity() {
     private fun processResponse(response: String) {
         try {
             cigEntries.clear()
+            cbdEntries.clear()
             weedEntries.clear()
-            thcEntries.clear()
 
             // CHANGE THIS LINE:
             // From: val jsonArray = JSONArray(response)
@@ -345,10 +345,10 @@ class MainActivity : Activity() {
 
                     if (type == "cigarette") {
                         cigEntries.add(SmokeEntry(entryId, formattedTime))
-                    } else if (type == "joint") {
+                    } else if (type == "joint" || type == "cbd_joint") {
+                        cbdEntries.add(SmokeEntry(entryId, formattedTime))
+                    } else if (type == "thc_joint" || type == "weed_joint") {
                         weedEntries.add(SmokeEntry(entryId, formattedTime))
-                    } else if (type == "thc_joint") {
-                        thcEntries.add(SmokeEntry(entryId, formattedTime))
                     }
                 } catch (e: Exception) {
                     //Log.e(TAG, "Parsing error: $e")
@@ -443,18 +443,18 @@ class MainActivity : Activity() {
         timerText = findViewById(R.id.timer_text)
         tvEndTime = findViewById(R.id.tvEndTime)
         btnCigarette = findViewById(R.id.btnCigarette)
+        btnCbd = findViewById(R.id.btnCbd)
         btnWeed = findViewById(R.id.btnWeed)
-        btnThc = findViewById(R.id.btnThc)
         btnReset = findViewById(R.id.btnReset)
         tvCigCount = findViewById(R.id.tvCigCount)
+        tvCbdCount = findViewById(R.id.tvCbdCount)
         tvWeedCount = findViewById(R.id.tvWeedCount)
-        tvThcCount = findViewById(R.id.tvThcCount)
         llCigEntries = findViewById(R.id.llCigEntries)
+        llCbdEntries = findViewById(R.id.llCbdEntries)
         llWeedEntries = findViewById(R.id.llWeedEntries)
-        llThcEntries = findViewById(R.id.llThcEntries)
         tvCigTitle = findViewById(R.id.tvCigTitle)
+        tvCbdTitle = findViewById(R.id.tvCbdTitle)
         tvWeedTitle = findViewById(R.id.tvWeedTitle)
-        tvThcTitle = findViewById(R.id.tvThcTitle)
 
         // --- Load entries from local storage for instant view ---
         renderLocalData()
@@ -473,13 +473,13 @@ class MainActivity : Activity() {
             restartTimer()
         }
 
-        btnWeed.setOnClickListener {
-            postSmokeEntry("joint")
+        btnCbd.setOnClickListener {
+            postSmokeEntry("cbd_joint")
             restartTimer()
         }
 
-        btnThc.setOnClickListener {
-            postSmokeEntry("thc_joint")
+        btnWeed.setOnClickListener {
+            postSmokeEntry("weed_joint")
             restartTimer()
         }
 
@@ -510,15 +510,15 @@ class MainActivity : Activity() {
 
     private fun updateCounterUI() {
         tvCigCount.text = "Cigarettes: " + cigEntries.size.toString()
-        tvWeedCount.text = "Joints: " + weedEntries.size.toString()
-        tvThcCount.text = "THC Count: " + thcEntries.size.toString()
+        tvCbdCount.text = "CBD: " + cbdEntries.size.toString()
+        tvWeedCount.text = "Weed: " + weedEntries.size.toString()
     }
 
 
     private fun updateEntriesUI() {
         llCigEntries.removeAllViews()
+        llCbdEntries.removeAllViews()
         llWeedEntries.removeAllViews()
-        llThcEntries.removeAllViews()
 
         // --- Cigarettes ---
         if (cigEntries.isNotEmpty()) {
@@ -541,7 +541,26 @@ class MainActivity : Activity() {
             tvCigTitle.visibility = View.GONE
         }
 
-        // --- Joints ---
+        // --- CBD ---
+        if (cbdEntries.isNotEmpty()) {
+            tvCbdTitle.visibility = View.VISIBLE
+            cbdEntries.forEach { entry ->
+                val textView = TextView(this).apply {
+                    text = entry.time
+                    textSize = 18f
+                    textAlignment = View.TEXT_ALIGNMENT_CENTER
+                    setPadding(0, 8, 0, 8)
+                    setOnClickListener {
+                        showDeleteConfirmationDialog(entry.id)
+                    }
+                }
+                llCbdEntries.addView(textView)
+            }
+        } else {
+            tvCbdTitle.visibility = View.GONE
+        }
+
+        // --- Weed Joints ---
         if (weedEntries.isNotEmpty()) {
             tvWeedTitle.visibility = View.VISIBLE
             weedEntries.forEach { entry ->
@@ -558,25 +577,6 @@ class MainActivity : Activity() {
             }
         } else {
             tvWeedTitle.visibility = View.GONE
-        }
-
-        // --- THC Joints ---
-        if (thcEntries.isNotEmpty()) {
-            tvThcTitle.visibility = View.VISIBLE
-            thcEntries.forEach { entry ->
-                val textView = TextView(this).apply {
-                    text = entry.time
-                    textSize = 18f
-                    textAlignment = View.TEXT_ALIGNMENT_CENTER
-                    setPadding(0, 8, 0, 8)
-                    setOnClickListener {
-                        showDeleteConfirmationDialog(entry.id)
-                    }
-                }
-                llThcEntries.addView(textView)
-            }
-        } else {
-            tvThcTitle.visibility = View.GONE
         }
     }
 
@@ -667,8 +667,8 @@ class MainActivity : Activity() {
         // Clear all locally stored entries
         saveLocalEntries(JSONArray())
         cigEntries.clear()
+        cbdEntries.clear()
         weedEntries.clear()
-        thcEntries.clear()
         updateCounterUI()
         updateEntriesUI()
     }
@@ -732,8 +732,8 @@ class MainActivity : Activity() {
 
     // --- You will need to define these constants or remove their usage ---
     private val CIG_COUNT_KEY = "cig_count"
-    private val WEED_COUNT_KEY = "weed_count"
+    private val CBD_COUNT_KEY = "cbd_count"
     private val CIG_ENTRIES_KEY = "cig_entries"
-    private val WEED_ENTRIES_KEY = "weed_entries"
+    private val CBD_ENTRIES_KEY = "cbd_entries"
     private val LAST_APP_OPEN_KEY = "last_open"
 }
