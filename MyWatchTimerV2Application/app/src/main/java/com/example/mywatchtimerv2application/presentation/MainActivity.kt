@@ -249,6 +249,12 @@ class MainActivity : Activity() {
     // Hour of day (0-23) at which the daily counters reset.
     private val RESET_HOUR = 9
 
+    // Price per item, in euros.
+    private val CIGARETTE_PRICE = 0.26
+    private val CBD_PRICE = 1.59
+    private val WEED_PRICE = 1.59
+    private val POLEN_PRICE = 1.08
+
     // UI
     private lateinit var timerText: TextView
     private lateinit var tvEndTime: TextView
@@ -257,6 +263,7 @@ class MainActivity : Activity() {
     private lateinit var btnWeed: ImageButton
     private lateinit var btnPolen: ImageButton
     private lateinit var btnReset: ImageButton
+    private lateinit var tvTotalCost: TextView
     private lateinit var tvCigCount: TextView
     private lateinit var tvCbdCount: TextView
     private lateinit var tvWeedCount: TextView
@@ -455,6 +462,7 @@ class MainActivity : Activity() {
         btnWeed = findViewById(R.id.btnWeed)
         btnPolen = findViewById(R.id.btnPolen)
         btnReset = findViewById(R.id.btnReset)
+        tvTotalCost = findViewById(R.id.tvTotalCost)
         tvCigCount = findViewById(R.id.tvCigCount)
         tvCbdCount = findViewById(R.id.tvCbdCount)
         tvWeedCount = findViewById(R.id.tvWeedCount)
@@ -530,6 +538,12 @@ class MainActivity : Activity() {
         tvCbdCount.text = "CBD: " + cbdEntries.size.toString()
         tvWeedCount.text = "Weed: " + weedEntries.size.toString()
         tvPolenCount.text = "Polen: " + polenEntries.size.toString()
+
+        val totalCost = cigEntries.size * CIGARETTE_PRICE +
+            cbdEntries.size * CBD_PRICE +
+            weedEntries.size * WEED_PRICE +
+            polenEntries.size * POLEN_PRICE
+        tvTotalCost.text = "Total: " + String.format("%.2f€", totalCost).replace('.', ',')
     }
 
 
