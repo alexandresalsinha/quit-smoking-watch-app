@@ -255,16 +255,20 @@ class MainActivity : Activity() {
     private lateinit var btnCigarette: ImageButton
     private lateinit var btnCbd: ImageButton
     private lateinit var btnWeed: ImageButton
+    private lateinit var btnPolen: ImageButton
     private lateinit var btnReset: ImageButton
     private lateinit var tvCigCount: TextView
     private lateinit var tvCbdCount: TextView
     private lateinit var tvWeedCount: TextView
+    private lateinit var tvPolenCount: TextView
     private lateinit var llCigEntries: LinearLayout
     private lateinit var llCbdEntries: LinearLayout
     private lateinit var llWeedEntries: LinearLayout
+    private lateinit var llPolenEntries: LinearLayout
     private lateinit var tvCigTitle: TextView
     private lateinit var tvCbdTitle: TextView
     private lateinit var tvWeedTitle: TextView
+    private lateinit var tvPolenTitle: TextView
 
     // State
     private var timerService: TimerService? = null
@@ -276,6 +280,7 @@ class MainActivity : Activity() {
     private var cigEntries = mutableListOf<SmokeEntry>()
     private var cbdEntries = mutableListOf<SmokeEntry>()
     private var weedEntries = mutableListOf<SmokeEntry>()
+    private var polenEntries = mutableListOf<SmokeEntry>()
 
     private lateinit var progressBar: ProgressBar
 
@@ -325,6 +330,7 @@ class MainActivity : Activity() {
             cigEntries.clear()
             cbdEntries.clear()
             weedEntries.clear()
+            polenEntries.clear()
 
             // CHANGE THIS LINE:
             // From: val jsonArray = JSONArray(response)
@@ -349,6 +355,8 @@ class MainActivity : Activity() {
                         cbdEntries.add(SmokeEntry(entryId, formattedTime))
                     } else if (type == "thc_joint" || type == "weed_joint") {
                         weedEntries.add(SmokeEntry(entryId, formattedTime))
+                    } else if (type == "polen_joint") {
+                        polenEntries.add(SmokeEntry(entryId, formattedTime))
                     }
                 } catch (e: Exception) {
                     //Log.e(TAG, "Parsing error: $e")
@@ -445,16 +453,20 @@ class MainActivity : Activity() {
         btnCigarette = findViewById(R.id.btnCigarette)
         btnCbd = findViewById(R.id.btnCbd)
         btnWeed = findViewById(R.id.btnWeed)
+        btnPolen = findViewById(R.id.btnPolen)
         btnReset = findViewById(R.id.btnReset)
         tvCigCount = findViewById(R.id.tvCigCount)
         tvCbdCount = findViewById(R.id.tvCbdCount)
         tvWeedCount = findViewById(R.id.tvWeedCount)
+        tvPolenCount = findViewById(R.id.tvPolenCount)
         llCigEntries = findViewById(R.id.llCigEntries)
         llCbdEntries = findViewById(R.id.llCbdEntries)
         llWeedEntries = findViewById(R.id.llWeedEntries)
+        llPolenEntries = findViewById(R.id.llPolenEntries)
         tvCigTitle = findViewById(R.id.tvCigTitle)
         tvCbdTitle = findViewById(R.id.tvCbdTitle)
         tvWeedTitle = findViewById(R.id.tvWeedTitle)
+        tvPolenTitle = findViewById(R.id.tvPolenTitle)
 
         // --- Load entries from local storage for instant view ---
         renderLocalData()
@@ -480,6 +492,11 @@ class MainActivity : Activity() {
 
         btnWeed.setOnClickListener {
             postSmokeEntry("weed_joint")
+            restartTimer()
+        }
+
+        btnPolen.setOnClickListener {
+            postSmokeEntry("polen_joint")
             restartTimer()
         }
 
@@ -512,6 +529,7 @@ class MainActivity : Activity() {
         tvCigCount.text = "Cigarettes: " + cigEntries.size.toString()
         tvCbdCount.text = "CBD: " + cbdEntries.size.toString()
         tvWeedCount.text = "Weed: " + weedEntries.size.toString()
+        tvPolenCount.text = "Polen: " + polenEntries.size.toString()
     }
 
 
@@ -519,6 +537,7 @@ class MainActivity : Activity() {
         llCigEntries.removeAllViews()
         llCbdEntries.removeAllViews()
         llWeedEntries.removeAllViews()
+        llPolenEntries.removeAllViews()
 
         // --- Cigarettes ---
         if (cigEntries.isNotEmpty()) {
@@ -577,6 +596,25 @@ class MainActivity : Activity() {
             }
         } else {
             tvWeedTitle.visibility = View.GONE
+        }
+
+        // --- Polen ---
+        if (polenEntries.isNotEmpty()) {
+            tvPolenTitle.visibility = View.VISIBLE
+            polenEntries.forEach { entry ->
+                val textView = TextView(this).apply {
+                    text = entry.time
+                    textSize = 18f
+                    textAlignment = View.TEXT_ALIGNMENT_CENTER
+                    setPadding(0, 8, 0, 8)
+                    setOnClickListener {
+                        showDeleteConfirmationDialog(entry.id)
+                    }
+                }
+                llPolenEntries.addView(textView)
+            }
+        } else {
+            tvPolenTitle.visibility = View.GONE
         }
     }
 
@@ -669,6 +707,7 @@ class MainActivity : Activity() {
         cigEntries.clear()
         cbdEntries.clear()
         weedEntries.clear()
+        polenEntries.clear()
         updateCounterUI()
         updateEntriesUI()
     }
